@@ -1,17 +1,18 @@
-# This workflow scans your Terraform files for security problems.
-# It runs automatically whenever code is pushed to the main branch.
-#
-# Save this file as: .github/workflows/terraform-scan.yml
+# Scans the AWS Terraform files (terraform/aws) for security problems.
+# Save as: .github/workflows/terraform-scan.yml
 
 name: Terraform Security Scan
 
-# WHEN should this run?
 on:
   push:
-    branches: [main]        # every push to main
+    branches: [main]
+    paths:
+      - 'terraform/aws/**'          # only run when AWS files change
   pull_request:
-    branches: [main]        # every pull request into main
-  workflow_dispatch:        # lets you run it manually from the Actions tab
+    branches: [main]
+    paths:
+      - 'terraform/aws/**'
+  workflow_dispatch:
 
 jobs:
 
@@ -23,17 +24,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Download your code onto the build machine
       - name: Get the code
         uses: actions/checkout@v4
 
-      # Run Checkov against your Terraform files
+      - name: Install Checkov
+        run: pip install checkov
+
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: terraform      # <-- change to your Terraform folder
-          framework: terraform
-          soft_fail: false          # false = fail the build if problems found
+        run: checkov -d terraform/aws --framework terraform --compact --quiet
+        #                   ^^^^^^^^^^^^^ only the AWS folder
 
   # =========================================================
   # JOB 2: Trivy
@@ -46,10 +45,20 @@ jobs:
       - name: Get the code
         uses: actions/checkout@v4
 
+      # Installing the binary directly instead of using trivy-action.
+      # The action's version tags were compromised in a March 2026
+      # supply-chain attack, so we avoid that dependency entirely.
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+            | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
       - name: Run Trivy
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: config
-          scan-ref: terraform       # <-- change to your Terraform folder
-          severity: CRITICAL,HIGH   # only care about serious problems
-          exit-code: '1'            # 1 = fail the build if problems found
+        run: trivy config terraform/aws --severity CRITICAL,HIGH --exit-code 1
+        #                  ^^^^^^^^^^^^^ only the AWS folder
